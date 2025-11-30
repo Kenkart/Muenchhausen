@@ -8,7 +8,6 @@ public class LocomotionEventRelay : MonoBehaviour
     {
         if (Instance != null)
         {
-            Debug.LogError("[Relay] Multiple LocomotionEventRelay instances detected!");
             Destroy(gameObject);
             return;
         }
