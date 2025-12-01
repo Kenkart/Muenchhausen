@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 public class LocomotionTarget : MonoBehaviour
 {
@@ -12,7 +13,14 @@ public class LocomotionTarget : MonoBehaviour
     public float spawnRadius = 60f;
     public Vector3 spawnCenter = Vector3.zero;
 
+    [Header("Spawn Restrictions")]
+    public float minDistanceFromFinalPos = 20f;
+
+    [Tooltip("Add circular no-spawn zones: world position + radius.")]
+    public List<NoSpawnCircle> noSpawnAreas = new();
+
     private Transform rootTransform;
+    private Vector3 lastFinalPos;
 
     private void Awake()
     {
@@ -28,6 +36,8 @@ public class LocomotionTarget : MonoBehaviour
 
     public void OnLocomotionEvent(Vector3 finalPosition)
     {
+        lastFinalPos = finalPosition;
+
         if (targetPoint == null)
         {
             Debug.LogError("[Target] targetPoint is NULL!");
@@ -38,9 +48,7 @@ public class LocomotionTarget : MonoBehaviour
         Vector2 a = new(finalPosition.x, finalPosition.z);
         Vector2 b = new(targetPoint.position.x, targetPoint.position.z);
         float distance = Vector2.Distance(a, b);
-
-        // 2) Show distance in UI
-        // DistanceFeedbackUI.Instance?.ShowDistance(distance);
+        Debug.Log($"[Target] Distance: {distance}");
 
         // 3) Spawn marker at previous location
         Vector3 previousPos = rootTransform.position;
@@ -55,24 +63,52 @@ public class LocomotionTarget : MonoBehaviour
 
     private void TeleportRootToRandomPoint()
     {
-        // Pick random XZ inside circle
-        Vector2 r = RandomInsideCircle(spawnRadius);
-        Vector3 newPos = new Vector3(r.x, 0f, r.y) + spawnCenter;
+        Vector3 newPos = new Vector3(0f, 0f, 0f);
 
-        // Snap Y to terrain height if available
-        if (Terrain.activeTerrain != null)
+        int attempts = 0;
+        const int maxAttempts = 200;
+
+        do
         {
-            float y = Terrain.activeTerrain.SampleHeight(newPos)
-                      + Terrain.activeTerrain.transform.position.y;
-            newPos.y = y;
+            attempts++;
+            if (attempts > maxAttempts)
+            {
+                Debug.LogWarning("[Target] Could not find a valid spawn position!");
+                break;
+            }
+
+            // Pick random XZ inside circle
+            Vector2 r = RandomInsideCircle(spawnRadius);
+            newPos = new Vector3(r.x, 0f, r.y) + spawnCenter;
+
+            // Snap Y to terrain height if available
+            if (Terrain.activeTerrain != null)
+            {
+                float y = Terrain.activeTerrain.SampleHeight(newPos)
+                          + Terrain.activeTerrain.transform.position.y;
+                newPos.y = y;
+            }
+
         }
+        while (
+            (Vector3.Distance(newPos, lastFinalPos) < minDistanceFromFinalPos) ||
+            IsInsideNoSpawnArea(newPos)
+        );
 
-        // Teleport the PREFAB ROOT
         rootTransform.position = newPos;
+    }
 
-#if UNITY_EDITOR
-        Debug.Log($"[Target] Teleported root to {newPos}");
-#endif
+    private bool IsInsideNoSpawnArea(Vector3 point)
+    {
+        foreach (var zone in noSpawnAreas)
+        {
+            Vector2 p = new(point.x, point.z);
+            Vector2 center = new(zone.center.x, zone.center.z);
+
+            if (Vector2.Distance(p, center) < zone.radius)
+                return true;
+        }
+        return false;
     }
 
     private Vector2 RandomInsideCircle(float radius)
@@ -80,5 +116,18 @@ public class LocomotionTarget : MonoBehaviour
         float angle = Random.value * 2f * Mathf.PI;
         float dist = Mathf.Sqrt(Random.value) * radius;
         return new Vector2(Mathf.Cos(angle) * dist, Mathf.Sin(angle) * dist);
+    }
+}
+
+[System.Serializable]
+public struct NoSpawnCircle
+{
+    public Vector3 center;
+    public float radius;
+
+    public NoSpawnCircle(Vector3 c, float r)
+    {
+        center = c;
+        radius = r;
     }
 }
