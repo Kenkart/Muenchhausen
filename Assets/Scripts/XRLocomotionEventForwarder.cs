@@ -1,48 +1,31 @@
 using UnityEngine;
-using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 using System.Collections;
 
 public class XRLocomotionEventForwarder : MonoBehaviour
 {
-    private TeleportationProvider provider;
-
-    private void Awake()
-    {
-        provider = FindObjectOfType<TeleportationProvider>();
-
-        if (!provider)
-            Debug.LogError("[Forwarder] No TeleportationProvider found!");
-    }
+    public BallisticTeleport ballisticTeleport;
 
     private void OnEnable()
     {
-        if (provider != null)
-            provider.locomotionEnded += OnLocomotionEnded;
+        if (ballisticTeleport != null)
+            ballisticTeleport.OnLocomotionEnded += HandleLocomotionEnded;
     }
 
     private void OnDisable()
     {
-        if (provider != null)
-            provider.locomotionEnded -= OnLocomotionEnded;
+        if (ballisticTeleport != null)
+            ballisticTeleport.OnLocomotionEnded -= HandleLocomotionEnded;
     }
 
-    private void OnLocomotionEnded(UnityEngine.XR.Interaction.Toolkit.Locomotion.LocomotionProvider prov)
+    private void HandleLocomotionEnded(Vector3 finalPosition)
     {
-        StartCoroutine(ReportAfterFrame(prov));
+        StartCoroutine(ReportAfterFrame(finalPosition));
     }
 
-    private IEnumerator ReportAfterFrame(UnityEngine.XR.Interaction.Toolkit.Locomotion.LocomotionProvider prov)
+    private IEnumerator ReportAfterFrame(Vector3 pos)
     {
-        // Wait until teleportation actually applies the new position
-        yield return null; // one frame delay
-
-        var xrOrigin = prov.mediator.xrOrigin;
-        if (!xrOrigin)
-        {
-            Debug.LogError("[Forwarder] xrOrigin is NULL in mediator!");
-        }
-
-        Vector3 pos = xrOrigin.transform.position;
+        // Wait one frame to ensure transforms are fully updated
+        yield return null;
         LocomotionEventRelay.Instance.ReportLocomotionComplete(pos);
     }
 }
