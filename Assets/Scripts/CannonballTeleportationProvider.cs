@@ -4,6 +4,7 @@ using UnityEngine.XR.Interaction.Toolkit.Locomotion;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion.Movement;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 
 public class CannonballTeleportationProvider : TeleportationProvider
 {
@@ -12,7 +13,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
     public float flightSpeed = 3f;
 
     [Tooltip("Minimum travel time in seconds (prevents too-fast jumps).")]
-    public float minTravelTime = 0.5f;
+    public float minTravelTime = 0.6f;
 
     [Tooltip("Maximum travel time in seconds (prevents too-slow jumps).")]
     public float maxTravelTime = 5f;
@@ -46,10 +47,32 @@ public class CannonballTeleportationProvider : TeleportationProvider
     [Tooltip("Input action reference for left controller joystick (2D axis). Required for in-air control.")]
     public InputActionReference leftJoystickInput;
 
+    [Header("Fade")]
+    [Tooltip("Enable fade-in/fade-out to minimize motion sickness during teleportation.")]
+    public bool enableFade = false;
+
+    [Tooltip("UI Image used for fade effect. Should be a full-screen black image on a Canvas.")]
+    public Image fadeImage;
+
+    [Tooltip("Time in seconds for fade to black at the start of flight.")]
+    public float fadeOutDuration = 0.3f;
+
+    [Tooltip("Time in seconds for fade from black before landing.")]
+    public float fadeInDuration = 0.3f;
+
+    [Tooltip("Percentage of flight time before landing to start fading back in (0-1).")]
+    [Range(0f, 1f)]
+    public float fadeInStartPercentage = 0.4f;
+
     // Store the launch position to prevent drift from continuous movement
     private Vector3 capturedLaunchPosition;
     private Vector3 capturedCameraOffset;
     private bool hasStoredLaunchPosition = false;
+
+    private void Start()
+    {
+        fadeImage.gameObject.SetActive(enableFade);
+    }
 
     /// <summary>
     /// Override the standard Update to intercept teleport requests and perform cannonball motion instead.
@@ -67,7 +90,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
             {
                 // Store XR Origin position and camera offset
                 capturedLaunchPosition = xrOrigin.transform.position;
-                
+
                 // Calculate camera offset from XR Origin
                 if (xrOrigin.Camera != null)
                 {
@@ -77,7 +100,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
                 {
                     capturedCameraOffset = Vector3.zero;
                 }
-                
+
                 hasStoredLaunchPosition = true;
             }
 
@@ -102,6 +125,12 @@ public class CannonballTeleportationProvider : TeleportationProvider
         if (enableInAirControl && leftJoystickInput != null && leftJoystickInput.action != null)
         {
             leftJoystickInput.action.Enable();
+        }
+
+        fadeImage.gameObject.SetActive(enableFade);
+        if (enableFade)
+        {
+            SetFadeAlpha(0f);
         }
     }
 
@@ -138,7 +167,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
         // Use the captured launch position (XR Origin + camera offset at start)
         Vector3 startOriginPos = hasStoredLaunchPosition ? capturedLaunchPosition : xrOrigin.transform.position;
         Vector3 cameraOffset = hasStoredLaunchPosition ? capturedCameraOffset : Vector3.zero;
-        
+
         // The actual start position is where the camera/player was
         Vector3 start = startOriginPos + cameraOffset;
         Vector3 target = currentRequest.destinationPosition;
@@ -150,7 +179,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
         Vector3 groundPosition = target;
         if (Physics.Raycast(target + Vector3.up * groundSnapCastHeight, Vector3.down, out RaycastHit groundHit, groundSnapMaxDistance, groundLayerMask))
             groundPosition = groundHit.point;
-        
+
         // But we want to animate the camera to land at ground + camera height
         Vector3 targetCamera = groundPosition;
         targetCamera.y = groundPosition.y + cameraOffset.y;
@@ -187,6 +216,9 @@ public class CannonballTeleportationProvider : TeleportationProvider
         // Track accumulated in-air offset for in-air control
         Vector3 inAirOffset = Vector3.zero;
 
+        // Calculate fade timing
+        float fadeInStartTime = T * (1f - fadeInStartPercentage);
+
         // Execute flight using parabolic motion
         while (time < T)
         {
@@ -207,7 +239,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
             if (enableInAirControl && leftJoystickInput != null && leftJoystickInput.action != null)
             {
                 Vector2 joystickInput = leftJoystickInput.action.ReadValue<Vector2>();
-                
+
                 if (joystickInput.sqrMagnitude > 0.01f) // Deadzone
                 {
                     // Get camera forward direction (flattened on XZ plane)
@@ -222,7 +254,7 @@ public class CannonballTeleportationProvider : TeleportationProvider
 
                     // Calculate movement direction relative to camera
                     Vector3 moveDirection = (forward * joystickInput.y + right * joystickInput.x);
-                    
+
                     // Accumulate offset based on input
                     inAirOffset += inAirControlSpeed * Time.deltaTime * moveDirection;
                 }
@@ -233,11 +265,30 @@ public class CannonballTeleportationProvider : TeleportationProvider
 
             // Move XROrigin to maintain camera at the desired position
             // XROrigin position = desired camera position - camera offset
-            Vector3 currentCameraOffset = xrOrigin.Camera != null 
-                ? xrOrigin.Camera.transform.position - xrOrigin.transform.position 
+            Vector3 currentCameraOffset = xrOrigin.Camera != null
+                ? xrOrigin.Camera.transform.position - xrOrigin.transform.position
                 : Vector3.zero;
-            
+
             xrOrigin.transform.position = currentCameraPosition - currentCameraOffset;
+
+            // Fade out during the beginning of flight
+            if (enableFade && time <= fadeOutDuration)
+            {
+                float fadeOutProgress = Mathf.Clamp01(time / fadeOutDuration);
+                SetFadeAlpha(fadeOutProgress);
+            }
+            // Hold full fade during middle of flight
+            else if (enableFade && time > fadeOutDuration && time < fadeInStartTime)
+            {
+                SetFadeAlpha(1f);
+            }
+            // Fade in before landing
+            else if (enableFade && time >= fadeInStartTime)
+            {
+                float remainingTime = T - time;
+                float fadeInProgress = 1f - (remainingTime / (T - fadeInStartTime));
+                SetFadeAlpha(1f - fadeInProgress);
+            }
 
             time += Time.deltaTime;
             yield return null;
@@ -245,12 +296,18 @@ public class CannonballTeleportationProvider : TeleportationProvider
 
         // Snap to exact final position (including in-air offset)
         // Position XR Origin so camera ends up at the target camera position + any in-air offset
-        Vector3 finalCameraOffset = xrOrigin.Camera != null 
-            ? xrOrigin.Camera.transform.position - xrOrigin.transform.position 
+        Vector3 finalCameraOffset = xrOrigin.Camera != null
+            ? xrOrigin.Camera.transform.position - xrOrigin.transform.position
             : Vector3.zero;
-        
+
         Vector3 finalCameraPosition = targetCamera + inAirOffset;
         xrOrigin.transform.position = finalCameraPosition - finalCameraOffset;
+
+        // Ensure fade is fully cleared
+        if (enableFade)
+        {
+            SetFadeAlpha(0f);
+        }
 
         // Wait one frame before re-enabling CharacterController
         // This prevents it from immediately correcting/snapping the position
@@ -273,6 +330,13 @@ public class CannonballTeleportationProvider : TeleportationProvider
 
         // End locomotion (fires events)
         TryEndLocomotion();
+    }
+
+    void SetFadeAlpha(float alpha)
+    {
+        Color color = fadeImage.color;
+        color.a = alpha;
+        fadeImage.color = color;
     }
 
     void ApplyOrientation()
