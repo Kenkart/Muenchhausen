@@ -36,6 +36,9 @@ public class BallisticTeleport : MonoBehaviour
 
     public event Action<Vector3> OnLocomotionEnded;
 
+    // --- added for timing/logging ---
+    private float movementStartTime;
+
     void OnEnable()
     {
         teleportActivateAction.action.Enable();
@@ -86,6 +89,17 @@ public class BallisticTeleport : MonoBehaviour
             if (t >= 1f)
             {
                 isFlying = false;
+
+                // compute actual movement duration
+                float movementDuration = Time.time - movementStartTime;
+                float distance = Vector3.Distance(startPos, targetPos);
+
+                // Log movement to ExperimentManager if present
+                if (ExperimentManager.Instance != null)
+                {
+                    ExperimentManager.Instance.RecordMovement(startPos, targetPos, distance, movementDuration);
+                }
+
                 OnLocomotionEnded?.Invoke(targetPos);
 
                 if (flightLine != null)
@@ -124,6 +138,9 @@ public class BallisticTeleport : MonoBehaviour
 
         elapsedTime = 0f;
         isFlying = true;
+
+        // start movement timer
+        movementStartTime = Time.time;
 
         if (flightLine != null)
         {

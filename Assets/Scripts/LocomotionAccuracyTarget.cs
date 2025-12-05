@@ -48,7 +48,16 @@ public class LocomotionTarget : MonoBehaviour
         Vector2 a = new(finalPosition.x, finalPosition.z);
         Vector2 b = new(targetPoint.position.x, targetPoint.position.z);
         float distance = Vector2.Distance(a, b);
-        Debug.Log($"[Target] Distance: {distance}");
+
+        // Write accuracy to CSV via ExperimentManager instead of Debug.Log
+        if (ExperimentManager.Instance != null)
+        {
+            ExperimentManager.Instance.RecordAccuracy(distance);
+        }
+        else
+        {
+            Debug.Log($"[Target] Distance: {distance} (no ExperimentManager present)");
+        }
 
         // 3) Spawn marker at previous location
         Vector3 previousPos = rootTransform.position;
