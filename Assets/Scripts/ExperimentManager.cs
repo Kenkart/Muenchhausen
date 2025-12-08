@@ -7,9 +7,7 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Singleton that manages experiment sets, movement logging and CSV output.
-/// Attach one instance to a persistent GameObject in the scene.
-/// CSV uses semicolon (';') as delimiter and CultureInfo.InvariantCulture for numeric formatting.
-/// Filename uses participantId as prefix.
+/// CSV uses semicolon (';') and CultureInfo.InvariantCulture.
 /// </summary>
 public class ExperimentManager : MonoBehaviour
 {
@@ -18,14 +16,21 @@ public class ExperimentManager : MonoBehaviour
     [Header("Identification")]
     public string participantId = "P01";
 
-    [Header("CSV Settings")]
-    public bool appendIfExists = false;
-
     [Header("Set / Player Settings")]
-    [Tooltip("If >0 the set will automatically end after this many movements.")]
-    public int maxMovementsPerSet = 0;
     [Tooltip("World spawn position where the player will be placed at set start/end.")]
     public Vector3 worldSpawn = Vector3.zero;
+
+    // Tutorial and condition flags
+    [HideInInspector]
+    public bool tutorialMode = false;
+
+    [HideInInspector]
+    public bool fadeEnabled = false;
+
+    [HideInInspector]
+    public bool inAirControlEnabled = false;
+
+    private const char Delim = ';';
 
     private string csvPath;
     private StreamWriter writer;
@@ -36,15 +41,13 @@ public class ExperimentManager : MonoBehaviour
     private int movementIndex = 0;
     private float setStartTime = 0f;
 
-    // Events for UI / other systems
+    // Events
     public event Action<int> OnSetStarted;
-    public event Action<int, float> OnSetEnded; // setId, duration
-    public event Action<int, int, float, float> OnMovementLogged; // setId, movementIndex, distance, movementDuration
-    public event Action<int, int, float> OnAccuracyRecorded; // setId, movementIndex, distanceFromTarget
+    public event Action<int, float> OnSetEnded;
+    public event Action<int, int, float, float> OnMovementLogged;
+    public event Action<int, int, float> OnAccuracyRecorded;
 
-    private const char Delim = ';';
-
-    // --- buffering so accuracy can be written in the same CSV line ---
+    // Buffered movement record
     private class MovementRecord
     {
         public string Timestamp;
@@ -55,11 +58,13 @@ public class ExperimentManager : MonoBehaviour
         public Vector3 Target;
         public float Distance;
         public float MovementDuration;
-        public float? DistanceFromTarget; // nullable until accuracy reported
+        public float? DistanceFromTarget;
+        public bool FadeEnabled;
+        public bool InAirControlEnabled;
+        public bool TutorialMode;
         public string Note;
     }
 
-    // pending movements keyed by movementIndex
     private readonly Dictionary<int, MovementRecord> pendingRecords = new Dictionary<int, MovementRecord>();
 
     void Awake()
@@ -69,7 +74,6 @@ public class ExperimentManager : MonoBehaviour
             Destroy(this);
             return;
         }
-
         Instance = this;
         DontDestroyOnLoad(gameObject);
     }
@@ -82,24 +86,18 @@ public class ExperimentManager : MonoBehaviour
     private void InitWriterIfNeeded()
     {
         if (writer != null) return;
-
         string timeStamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string safeId = string.IsNullOrWhiteSpace(participantId) ? "participant" : participantId;
-        string fileName = $"{safeId}_{timeStamp}.csv";
+        string fileName = string.Format("{0}_{1}.csv", safeId, timeStamp);
         csvPath = Path.Combine(Application.persistentDataPath, fileName);
-
-        FileMode mode = appendIfExists && File.Exists(csvPath) ? FileMode.Append : FileMode.Create;
-        var fs = new FileStream(csvPath, mode, FileAccess.Write, FileShare.Read);
+        var fs = new FileStream(csvPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         writer = new StreamWriter(fs, Encoding.UTF8) { AutoFlush = true };
-
         WriteHeader();
     }
 
     private void WriteHeader()
     {
         if (headerWritten || writer == null) return;
-
-        // Header uses semicolon delimiter and includes DistanceFromTarget and Note columns.
         string header = string.Join(Delim.ToString(), new[]
         {
             "Timestamp",
@@ -115,18 +113,18 @@ public class ExperimentManager : MonoBehaviour
             "Distance",
             "MovementDuration",
             "DistanceFromTarget",
+            "FadeEnabled",
+            "InAirControlEnabled",
+            "TutorialMode",
             "Note"
         });
-
         writer.WriteLine(header);
         headerWritten = true;
     }
 
     private void CloseWriter()
     {
-        // flush pending before closing
         FlushAllPending();
-
         if (writer != null)
         {
             writer.Flush();
@@ -142,100 +140,71 @@ public class ExperimentManager : MonoBehaviour
     public void StartSet()
     {
         InitWriterIfNeeded();
-
-        if (currentSetId != 0)
-            return; // already running
-
-        currentSetId = nextSetId;
-        nextSetId++;
+        if (currentSetId != 0) return;
+        currentSetId = nextSetId++;
         movementIndex = 0;
         setStartTime = Time.time;
-
-        // Reset all targets and place player at world spawn
         ResetTargets();
         PlacePlayerAtWorldSpawn();
-
         OnSetStarted?.Invoke(currentSetId);
+    }
+
+    public void EndSet()
+    {
+        if (currentSetId == 0) return;
+        float setDuration = Time.time - setStartTime;
+        FlushAllPending();
+        if (writer != null)
+        {
+            string[] parts = new string[]
+            {
+                DateTime.Now.ToString("o"),
+                participantId,
+                currentSetId.ToString(CultureInfo.InvariantCulture),
+                "0",
+                "","","",
+                "","","",
+                "",
+                setDuration.ToString(CultureInfo.InvariantCulture),
+                "",
+                fadeEnabled.ToString(CultureInfo.InvariantCulture),
+                inAirControlEnabled.ToString(CultureInfo.InvariantCulture),
+                tutorialMode.ToString(CultureInfo.InvariantCulture),
+                "SET_END"
+            };
+            writer.WriteLine(string.Join(Delim.ToString(), parts));
+        }
+        OnSetEnded?.Invoke(currentSetId, setDuration);
+        PlacePlayerAtWorldSpawn();
+        var targets = FindObjectsOfType<LocomotionTarget>();
+        foreach (var t in targets) t.gameObject.SetActive(true);
+        currentSetId = 0;
+        movementIndex = 0;
     }
 
     private void ResetTargets()
     {
         var targets = FindObjectsOfType<LocomotionTarget>();
         if (targets == null || targets.Length == 0) return;
-
         foreach (var t in targets)
         {
-            // set the target transform position to its spawn center
-            // (avoid setting transform.root.position to prevent moving unrelated objects like the player)
             t.transform.position = t.spawnCenter;
+            t.gameObject.SetActive(!tutorialMode);
         }
     }
 
     private void PlacePlayerAtWorldSpawn()
     {
         var player = FindObjectOfType<BallisticTeleport>();
-        if (player != null)
-        {
-            // set world position explicitly
-            player.transform.position = worldSpawn;
-        }
+        if (player != null) player.transform.position = worldSpawn;
     }
 
-    public void EndSet()
-    {
-        if (currentSetId == 0) return;
-
-        float setDuration = Time.time - setStartTime;
-
-        // flush any pending movement (write them even without accuracy)
-        FlushAllPending();
-
-        if (writer != null)
-        {
-            // Keep field count consistent: fill unused numeric fields with empty strings,
-            // put setDuration into MovementDuration column and note as SET_END.
-            string[] parts = new string[]
-            {
-                DateTime.Now.ToString("o"),                                 // Timestamp
-                participantId,                                              // ParticipantId
-                currentSetId.ToString(CultureInfo.InvariantCulture),       // SetId
-                "0",                                                        // MovementIndex
-                "", "", "",                                                 // StartX/Y/Z
-                "", "", "",                                                 // TargetX/Y/Z
-                "",                                                         // Distance
-                setDuration.ToString(CultureInfo.InvariantCulture),        // MovementDuration (used for set summary)
-                "",                                                         // DistanceFromTarget
-                "SET_END"                                                   // Note
-            };
-
-            writer.WriteLine(string.Join(Delim.ToString(), parts));
-        }
-
-        OnSetEnded?.Invoke(currentSetId, setDuration);
-
-        // ensure player is placed at world spawn when set ends
-        PlacePlayerAtWorldSpawn();
-
-        currentSetId = 0;
-        movementIndex = 0;
-    }
-
-    /// <summary>
-    /// Record a single movement. Called by locomotion scripts.
-    /// Movement is buffered and event is fired. CSV line will be written when accuracy arrives
-    /// or when flushed (next movement or end of set).
-    /// </summary>
     public void RecordMovement(Vector3 start, Vector3 target, float distance, float movementDuration)
     {
-        if (writer == null) InitWriterIfNeeded();
-
-        // before adding new movement, flush any older pending entries that didn't receive accuracy
-        // (this ensures we don't keep infinitely many pending if accuracy never comes)
+        InitWriterIfNeeded();
         FlushPendingOlderThan(movementIndex + 1);
-
         movementIndex++;
-
-        var rec = new MovementRecord()
+        var rec = new MovementRecord
         {
             Timestamp = DateTime.Now.ToString("o"),
             ParticipantId = participantId,
@@ -246,69 +215,56 @@ public class ExperimentManager : MonoBehaviour
             Distance = distance,
             MovementDuration = movementDuration,
             DistanceFromTarget = null,
+            FadeEnabled = fadeEnabled,
+            InAirControlEnabled = inAirControlEnabled,
+            TutorialMode = tutorialMode,
             Note = ""
         };
-
         pendingRecords[movementIndex] = rec;
-
-        // fire event immediately so UI updates
         OnMovementLogged?.Invoke(currentSetId, movementIndex, distance, movementDuration);
-
-        // Auto-stop if limit reached (flush pending before ending)
-        if (maxMovementsPerSet > 0 && movementIndex >= maxMovementsPerSet)
-        {
-            EndSet();
-        }
     }
 
-    /// <summary>
-    /// Record the distance-from-target (accuracy) for the most recent movement.
-    /// When accuracy arrives we finalize and write the corresponding CSV line.
-    /// </summary>
     public void RecordAccuracy(float distanceFromTarget)
     {
-        if (writer == null) InitWriterIfNeeded();
-
+        InitWriterIfNeeded();
         int idx = movementIndex;
-
-        // try to find pending record for this index
-        if (pendingRecords.TryGetValue(idx, out MovementRecord rec))
+        if (pendingRecords.TryGetValue(idx, out var rec))
         {
             rec.DistanceFromTarget = distanceFromTarget;
-            WriteMovementRecord(rec);
+            if (!tutorialMode) WriteMovementRecord(rec);
             pendingRecords.Remove(idx);
         }
         else
         {
-            // no pending record found (edge case) -> write a standalone line with accuracy only
-            string[] parts = new string[]
+            if (!tutorialMode && writer != null)
             {
-                DateTime.Now.ToString("o"),
-                participantId,
-                currentSetId.ToString(CultureInfo.InvariantCulture),
-                idx.ToString(CultureInfo.InvariantCulture),
-                "", "", "",
-                "", "", "",
-                "", // Distance
-                "", // MovementDuration
-                distanceFromTarget.ToString(CultureInfo.InvariantCulture), // DistanceFromTarget
-                "ACCURACY_ORPHAN"
-            };
-            writer.WriteLine(string.Join(Delim.ToString(), parts));
+                string[] parts = new string[]
+                {
+                    DateTime.Now.ToString("o"),
+                    participantId,
+                    currentSetId.ToString(CultureInfo.InvariantCulture),
+                    idx.ToString(CultureInfo.InvariantCulture),
+                    "","","",
+                    "","","",
+                    "",
+                    "",
+                    distanceFromTarget.ToString(CultureInfo.InvariantCulture),
+                    fadeEnabled.ToString(CultureInfo.InvariantCulture),
+                    inAirControlEnabled.ToString(CultureInfo.InvariantCulture),
+                    tutorialMode.ToString(CultureInfo.InvariantCulture),
+                    "ACCURACY_ORPHAN"
+                };
+                writer.WriteLine(string.Join(Delim.ToString(), parts));
+            }
         }
-
         OnAccuracyRecorded?.Invoke(currentSetId, idx, distanceFromTarget);
     }
 
-    // write a buffered movement record into CSV (fully populated, accuracy may be null)
     private void WriteMovementRecord(MovementRecord r)
     {
         if (writer == null) InitWriterIfNeeded();
-
-        string distFromTargetStr = r.DistanceFromTarget.HasValue
-            ? r.DistanceFromTarget.Value.ToString(CultureInfo.InvariantCulture)
-            : "";
-
+        if (tutorialMode) return;
+        string distFromTargetStr = r.DistanceFromTarget.HasValue ? r.DistanceFromTarget.Value.ToString(CultureInfo.InvariantCulture) : "";
         string[] parts = new string[]
         {
             r.Timestamp,
@@ -324,13 +280,14 @@ public class ExperimentManager : MonoBehaviour
             r.Distance.ToString(CultureInfo.InvariantCulture),
             r.MovementDuration.ToString(CultureInfo.InvariantCulture),
             distFromTargetStr,
+            r.FadeEnabled.ToString(CultureInfo.InvariantCulture),
+            r.InAirControlEnabled.ToString(CultureInfo.InvariantCulture),
+            r.TutorialMode.ToString(CultureInfo.InvariantCulture),
             r.Note ?? ""
         };
-
         writer.WriteLine(string.Join(Delim.ToString(), parts));
     }
 
-    // flush and write any pending records with index < threshold (or all if threshold <= 0)
     private void FlushPendingOlderThan(int thresholdExclusive)
     {
         var keys = new List<int>(pendingRecords.Keys);
@@ -339,23 +296,45 @@ public class ExperimentManager : MonoBehaviour
             if (thresholdExclusive <= 0 || k < thresholdExclusive)
             {
                 var rec = pendingRecords[k];
-                WriteMovementRecord(rec);
+                if (!tutorialMode) WriteMovementRecord(rec);
                 pendingRecords.Remove(k);
             }
         }
     }
 
-    // flush all pending records
     private void FlushAllPending()
     {
         FlushPendingOlderThan(int.MaxValue);
     }
 
-    /// <summary>
-    /// Optional helper: returns current csv path (null if not created yet).
-    /// </summary>
     public string GetCsvPath()
     {
         return csvPath;
+    }
+
+    // Condition control (dummies)
+    public void SetTutorialMode(bool enabled)
+    {
+        tutorialMode = enabled;
+        var targets = FindObjectsOfType<LocomotionTarget>();
+        foreach (var t in targets) t.gameObject.SetActive(!tutorialMode);
+    }
+
+    public void SetFadeEnabled(bool enabled)
+    {
+        fadeEnabled = enabled;
+        Debug.Log($"[ExperimentManager] Fade set to: {enabled}");
+    }
+
+    public void SetInAirControlEnabled(bool enabled)
+    {
+        inAirControlEnabled = enabled;
+        Debug.Log($"[ExperimentManager] In-Air Control set to: {enabled}");
+    }
+
+    public void SetConditions(bool fade, bool inAir)
+    {
+        SetFadeEnabled(fade);
+        SetInAirControlEnabled(inAir);
     }
 }
