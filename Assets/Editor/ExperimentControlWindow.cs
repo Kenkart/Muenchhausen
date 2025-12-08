@@ -11,14 +11,15 @@ using System.Collections.Generic;
 public class ExperimentControlWindow : EditorWindow
 {
     private string participantId = "P01";
-    private bool appendIfExists = false;
-
-    [Tooltip("If >0 a set will automatically end after this many movements.")]
-    private int maxMovements = 4;
 
     private Vector2 scroll;
     private string status = "Stopped";
     private int currentSet = 0;
+
+    // condition flags shown in UI
+    private bool tutorialModeFlag = false;
+    private bool fadeFlag = false;
+    private bool inAirFlag = false;
 
     // local representation of movements for the current set
     private class MovementEntry
@@ -40,12 +41,13 @@ public class ExperimentControlWindow : EditorWindow
     public static void ShowWindow()
     {
         var w = GetWindow<ExperimentControlWindow>("Experiment Control");
-        w.minSize = new Vector2(360, 200);
+        w.minSize = new Vector2(360, 240);
     }
 
     private void OnEnable()
     {
         EditorApplication.playModeStateChanged += OnPlayModeChanged;
+
         BindFromManager();
     }
 
@@ -71,9 +73,12 @@ public class ExperimentControlWindow : EditorWindow
         var mgr = UnityEngine.Object.FindObjectOfType<ExperimentManager>();
         if (mgr != null)
         {
-            participantId = mgr.participantId;
-            appendIfExists = mgr.appendIfExists;
-            maxMovements = mgr.maxMovementsPerSet;
+            mgr.participantId = participantId;
+
+            // read current condition flags
+            tutorialModeFlag = mgr.tutorialMode;
+            fadeFlag = mgr.fadeEnabled;
+            inAirFlag = mgr.inAirControlEnabled;
 
             // subscribe
             mgr.OnSetStarted += OnSetStarted;
@@ -108,9 +113,42 @@ public class ExperimentControlWindow : EditorWindow
 
         EditorGUI.BeginDisabledGroup(EditorApplication.isPlaying);
         participantId = EditorGUILayout.TextField("Participant ID", participantId);
-        appendIfExists = EditorGUILayout.Toggle("Append If Exists", appendIfExists);
-        maxMovements = EditorGUILayout.IntField("Max Movements (0 = disabled)", maxMovements);
         EditorGUI.EndDisabledGroup();
+
+        GUILayout.Space(6);
+
+        // Condition controls
+        EditorGUILayout.BeginHorizontal();
+        EditorGUI.BeginDisabledGroup(!EditorApplication.isPlaying);
+        bool newTutorial = EditorGUILayout.ToggleLeft("Tutorial Mode", tutorialModeFlag, GUILayout.Width(140));
+        bool newFade = EditorGUILayout.ToggleLeft("Fade", fadeFlag, GUILayout.Width(80));
+        bool newInAir = EditorGUILayout.ToggleLeft("In-Air Control", inAirFlag, GUILayout.Width(120));
+        EditorGUI.EndDisabledGroup();
+        EditorGUILayout.EndHorizontal();
+
+        // If changed and in play mode, apply to manager
+        if (EditorApplication.isPlaying)
+        {
+            var mgr = UnityEngine.Object.FindObjectOfType<ExperimentManager>();
+            if (mgr != null)
+            {
+                if (newTutorial != tutorialModeFlag)
+                {
+                    tutorialModeFlag = newTutorial;
+                    mgr.SetTutorialMode(tutorialModeFlag);
+                }
+                if (newFade != fadeFlag)
+                {
+                    fadeFlag = newFade;
+                    mgr.SetFadeEnabled(fadeFlag);
+                }
+                if (newInAir != inAirFlag)
+                {
+                    inAirFlag = newInAir;
+                    mgr.SetInAirControlEnabled(inAirFlag);
+                }
+            }
+        }
 
         GUILayout.Space(6);
 
@@ -124,8 +162,6 @@ public class ExperimentControlWindow : EditorWindow
                 {
                     // ensure manager uses current UI fields
                     mgr.participantId = participantId;
-                    mgr.appendIfExists = appendIfExists;
-                    mgr.maxMovementsPerSet = maxMovements; // pass persisted value
                     mgr.StartSet();
                 }
             }

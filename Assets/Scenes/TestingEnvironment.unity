@@ -3968,6 +3968,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 628ca882a5b7c144799112fa3339945c, type: 3}
+--- !u!1 &1218696007 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 998317308621576687, guid: e1fb2c63256522946bd9b6e7e6bf1b01, type: 3}
+  m_PrefabInstance: {fileID: 6579055974234494849}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1220370874
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -5287,7 +5292,7 @@ MonoBehaviour:
   fadeImage: {fileID: 2043178802}
   fadeOutTime: 0.35
   fadeInTime: 0.5
-  useInAirControl: 1
+  useInAirControl: 0
   leftJoystickAction: {fileID: 6972639530819350904, guid: c348712bda248c246b8c49b3db54643f, type: 3}
   minDistance: 0.5
   maxDistance: 20
@@ -5773,9 +5778,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantId: P01
-  appendIfExists: 1
-  maxMovementsPerSet: 0
   worldSpawn: {x: 0, y: 0, z: 0}
+  locomotionTarget: {fileID: 1218696007}
+  tutorialMode: 0
+  fadeEnabled: 0
+  inAirControlEnabled: 0
 --- !u!1001 &2093393658
 PrefabInstance:
   m_ObjectHideFlags: 0
