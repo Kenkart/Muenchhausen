@@ -5287,6 +5287,12 @@ MonoBehaviour:
   fadeImage: {fileID: 2043178802}
   fadeOutTime: 0.35
   fadeInTime: 0.5
+  useInAirControl: 1
+  leftJoystickAction: {fileID: 6972639530819350904, guid: c348712bda248c246b8c49b3db54643f, type: 3}
+  minDistance: 0.5
+  maxDistance: 20
+  logarithmicBase: 2
+  minSpeedMultiplier: 0.2
 --- !u!114 &1957590625
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5665,6 +5671,7 @@ GameObject:
   - component: {fileID: 2092139009}
   - component: {fileID: 2092139008}
   - component: {fileID: 2092139011}
+  - component: {fileID: 2092139012}
   m_Layer: 0
   m_Name: EventSystem
   m_TagString: Untagged
@@ -5753,6 +5760,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 441c1c7128c802e44a082bf509c69b09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &2092139012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2092139007}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb0512adc23ef1642bde495b596f2946, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  participantId: P01
+  appendIfExists: 1
+  maxMovementsPerSet: 0
+  worldSpawn: {x: 0, y: 0, z: 0}
 --- !u!1001 &2093393658
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -5946,7 +5969,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 58445279793260688}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9b1e8c997df241c1a67045eeac79b41b, type: 3}
   m_Name: 

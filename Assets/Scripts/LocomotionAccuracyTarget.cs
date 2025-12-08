@@ -59,22 +59,19 @@ public class LocomotionTarget : MonoBehaviour
             Debug.Log($"[Target] Distance: {distance} (no ExperimentManager present)");
         }
 
-+        // 3) Delete all old marker instances
-+        var markers = GameObject.FindGameObjectsWithTag("Marker");
-+        foreach (var m in markers)
-+            Destroy(m);
-+
-+        // 4) Spawn marker at previous location
-         Vector3 previousPos = rootTransform.position;
-         if (showMarker && markerPrefab != null)
-         {
-             Instantiate(markerPrefab, previousPos, Quaternion.identity);
-         }
+        // 3) Delete all old marker instances
+        var markers = GameObject.FindGameObjectsWithTag("Marker");
+        foreach (var m in markers)
+            Destroy(m);
 
-+        // 5) Teleport target to new location
-         TeleportRootToRandomPoint();
-     }
+        // 4) Spawn marker at previous location
+        Vector3 previousPos = rootTransform.position;
+        if (showMarker && markerPrefab != null)
+        {
+            Instantiate(markerPrefab, previousPos, Quaternion.identity);
+        }
 
+        // 5) Teleport target to new location
         TeleportRootToRandomPoint();
     }
 

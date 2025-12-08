@@ -32,7 +32,18 @@ public class BallisticTeleport : MonoBehaviour
     public float fadeOutTime = 0.35f;
     public float fadeInTime = 0.5f;
 
+    [Header("In Air Control Settings")]
+    public bool useInAirControl = false;
+    public InputActionReference leftJoystickAction;
+    public float minDistance = 0.5f; // Distance at which movement becomes very slow
+    public float maxDistance = 20f;  // Distance at which movement is at max speed
+    [Range(1f, 10f)]
+    public float logarithmicBase = 2f; // Adjust steepness of logarithmic curve
+    [Range(0.1f, 0.5f)]
+    public float minSpeedMultiplier = 0.2f; // Minimum speed to ensure player can always move
+
     private bool fadeInTriggered = false;
+    private Vector3 inAirControlOffset = Vector3.zero;
 
     public event Action<Vector3> OnLocomotionEnded;
 
@@ -42,11 +53,13 @@ public class BallisticTeleport : MonoBehaviour
     void OnEnable()
     {
         teleportActivateAction.action.Enable();
+        leftJoystickAction.action.Enable();
     }
 
     void OnDisable()
     {
         teleportActivateAction.action.Disable();
+        leftJoystickAction.action.Disable();
     }
 
     void Update()
@@ -69,6 +82,9 @@ public class BallisticTeleport : MonoBehaviour
 
         if (isFlying)
         {
+            if (useInAirControl)
+                ApplyInAirControl();
+
             elapsedTime += Time.deltaTime;
             float t = Mathf.Clamp01(elapsedTime / flightTime);
 
@@ -108,6 +124,48 @@ public class BallisticTeleport : MonoBehaviour
         }
     }
 
+    void ApplyInAirControl()
+    {
+        Vector2 joystickInput = leftJoystickAction.action.ReadValue<Vector2>();
+        if (joystickInput.magnitude < 0.1f) return;
+
+        // Camera-relative input
+        Transform cam = Camera.main.transform;
+        Vector3 forward = Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized;
+        Vector3 right = Vector3.ProjectOnPlane(cam.right, Vector3.up).normalized;
+
+        Vector3 moveDir = (forward * joystickInput.y + right * joystickInput.x).normalized;
+
+        // --- Determine remaining distance (horizontal only) ---
+        float t = Mathf.Clamp01(elapsedTime / flightTime);
+
+        Vector3 currentFlightPos = Vector3.Lerp(startPos, targetPos, t);
+        currentFlightPos.y += maxHeight * 4 * t * (1 - t);
+
+        float remainingDist =
+            Vector3.Distance(new Vector3(currentFlightPos.x, 0, currentFlightPos.z),
+                             new Vector3(targetPos.x, 0, targetPos.z));
+
+        // --- Logarithmic speed falloff based on remaining distance ---
+        float normalized = Mathf.InverseLerp(minDistance, maxDistance, remainingDist);
+        float logSpeed = Mathf.Lerp(minSpeedMultiplier, 1f,
+                         Mathf.Log(normalized + 0.01f, logarithmicBase) /
+                         Mathf.Log(1.01f, logarithmicBase));
+
+        float actualSpeed = maxSpeed * logSpeed * joystickInput.magnitude;
+
+        // --- CHANGE: Move target instead of offset ---
+        targetPos += moveDir * actualSpeed * Time.deltaTime;
+
+        // Recompute maxHeight dynamically
+        float horiz = Vector3.Distance(
+            new Vector3(startPos.x, 0, startPos.z),
+            new Vector3(targetPos.x, 0, targetPos.z));
+        float verticalDelta = targetPos.y - startPos.y;
+        maxHeight = Mathf.Max(0.1f, verticalDelta + horiz * 0.25f);
+    }
+
+
     IEnumerator FadeLaunch(Vector3 target)
     {
         // Fade out BEFORE movement
@@ -126,20 +184,25 @@ public class BallisticTeleport : MonoBehaviour
         startPos = transform.position;
         targetPos = target;
 
-        float horiz = Vector3.Distance(
-            new Vector3(startPos.x, 0, startPos.z),
-            new Vector3(targetPos.x, 0, targetPos.z));
+        float horizDist =
+            Vector3.Distance(new Vector3(startPos.x, 0, startPos.z),
+                             new Vector3(targetPos.x, 0, targetPos.z));
 
-        float verticalDelta = targetPos.y - startPos.y;
-        maxHeight = Mathf.Max(0.1f, verticalDelta + horiz * 0.25f);
+        float heightDelta = targetPos.y - startPos.y;
 
-        float distance = Vector3.Distance(startPos, targetPos);
-        flightTime = Mathf.Max(distance / maxSpeed, 0.1f);
+        // Compute apex height
+        maxHeight = Mathf.Max(0.1f, heightDelta + horizDist * 0.25f);
+
+        // NEW: Compute speed required for ballistic travel.
+        // We assume a "desired" flight duration for correctness (1–2 sec)
+        float desiredFlightTime = Mathf.Clamp(horizDist / maxSpeed, 0.3f, 2.5f);
+
+        flightTime = desiredFlightTime;
 
         elapsedTime = 0f;
         isFlying = true;
 
-        // start movement timer
+        // Log time
         movementStartTime = Time.time;
 
         if (flightLine != null)
@@ -148,6 +211,7 @@ public class BallisticTeleport : MonoBehaviour
             flightLine.positionCount = lineResolution;
         }
     }
+
 
     void UpdateFlightLine(float t)
     {
